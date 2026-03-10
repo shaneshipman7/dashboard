@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>ATOM / Small-Cap Pennant Scanner (CORS Proxy)</title>
+<title>Multi-Ticker Pennant Dashboard w/ Interpretations</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 body { background:#111; color:#eee; font-family:Arial; margin:20px; }
-h1, h2 { color:#6cf; }
-input, button, textarea { width:100%; background:#222; color:white; border:1px solid #555; padding:6px; margin-bottom:10px; }
+h1,h2,h3 { color:#6cf; }
+input,button,textarea { width:100%; background:#222; color:white; border:1px solid #555; padding:6px; margin-bottom:10px; }
 button { background:#3a8cff; cursor:pointer; }
 table { border-collapse:collapse; width:100%; margin-bottom:20px; }
 th,td { border:1px solid #444; padding:6px; text-align:center; }
@@ -13,29 +14,26 @@ th { background:#222; }
 tr:nth-child(even){ background:#1a1a1a; }
 .section { border:1px solid #444; padding:20px; margin-bottom:25px; border-radius:10px; background:#181818; }
 .noteBox { width:100%; height:120px; background:#222; color:white; border:1px solid #555; padding:10px; }
+.highlight { background:#1a5; color:#fff; font-weight:bold; }
+.interpretation { border:1px solid #444; padding:15px; border-radius:10px; background:#222; color:#6cf; margin-bottom:20px; }
+canvas { height:50px !important; }
 </style>
 </head>
 <body>
 
-<h1>ATOM / Small-Cap Pennant Scanner (CORS Proxy)</h1>
+<h1>Multi-Ticker Pennant Dashboard</h1>
 
 <div class="section">
-<h2>1️⃣ Stock Symbol</h2>
-<input id="ticker" value="ATOM">
-<button onclick="fetchData()">Fetch Data & Analyze</button>
+<h2>1️⃣ Watchlist (comma-separated tickers)</h2>
+<input id="tickers" value="ATOM,OPEN">
+<button onclick="fetchAllTickers()">Fetch & Analyze</button>
 </div>
 
 <div class="section">
 <h2>2️⃣ Scanner Results</h2>
 <table id="resultTable">
 <tr>
-<th>Date</th>
-<th>Close</th>
-<th>Flagpole%</th>
-<th>Pennant Compression</th>
-<th>Breakout?</th>
-<th>Measured Target</th>
-<th>Score</th>
+<th>Ticker</th><th>Date</th><th>Close</th><th>Flagpole%</th><th>Compression</th><th>Breakout?</th><th>Measured Target</th><th>Score</th><th>Alert</th><th>Chart</th>
 </tr>
 </table>
 </div>
@@ -46,9 +44,22 @@ tr:nth-child(even){ background:#1a1a1a; }
 </div>
 
 <script>
-async function fetchData(){
-    let symbol=document.getElementById("ticker").value.toUpperCase();
-    // CORS proxy prepended
+async function fetchAllTickers(){
+    const tickerInput=document.getElementById("tickers").value;
+    const tickers=tickerInput.split(",").map(t=>t.trim().toUpperCase());
+    document.getElementById("resultTable").innerHTML=`<tr>
+    <th>Ticker</th><th>Date</th><th>Close</th><th>Flagpole%</th><th>Compression</th><th>Breakout?</th><th>Measured Target</th><th>Score</th><th>Alert</th><th>Chart</th>
+    </tr>`;
+    
+    // Remove old interpretations
+    document.querySelectorAll('.interpretation').forEach(div=>div.remove());
+
+    for(const symbol of tickers){
+        await fetchTicker(symbol);
+    }
+}
+
+async function fetchTicker(symbol){
     const url=`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + symbol + '?interval=1d&range=3mo')}`;
     try{
         const res=await fetch(url);
@@ -57,9 +68,8 @@ async function fetchData(){
         const result=json.chart.result[0];
         const timestamps=result.timestamp;
         const indicators=result.indicators.quote[0];
-        if(!timestamps || !indicators.close) { alert("No data available"); return; }
+        if(!timestamps || !indicators.close) { console.log("No data for "+symbol); return; }
 
-        // Prepare OHLCV array
         let data=[];
         for(let i=0;i<timestamps.length;i++){
             data.push({
@@ -72,33 +82,28 @@ async function fetchData(){
             });
         }
 
-        analyzePennant(data);
-    }catch(e){ alert("Error fetching data: "+e);}
+        analyzePennantMulti(symbol,data);
+    }catch(e){ console.log("Error fetching "+symbol+": "+e);}
 }
 
-// Helper for avg volume
 function avgVolume(data,N){
-    let subset=data.slice(-N);
-    let sum=subset.reduce((a,b)=>a+b.volume,0);
-    return sum/subset.length;
+    return data.slice(-N).reduce((a,b)=>a+b.volume,0)/N;
 }
 
-function analyzePennant(data){
-    const N=10; // lookback days
+function analyzePennantMulti(symbol,data){
+    const N=10;
     let last=data[data.length-1];
+    let lookback=data.slice(-N);
 
-    // Flagpole calculation
-    let maxClose=Math.max(...data.slice(-N).map(d=>d.close));
-    let minClose=Math.min(...data.slice(-N).map(d=>d.close));
+    let maxClose=Math.max(...lookback.map(d=>d.close));
+    let minClose=Math.min(...lookback.map(d=>d.close));
     let flagpoleHeight=maxClose-minClose;
     let flagpolePercent=(flagpoleHeight/minClose)*100;
 
-    // Pennant compression
-    let upperTrend = data.slice(-N).map(d=>d.high);
-    let lowerTrend = data.slice(-N).map(d=>d.low);
+    let upperTrend = lookback.map(d=>d.high);
+    let lowerTrend = lookback.map(d=>d.low);
     let compression = (Math.max(...upperTrend)-Math.min(...lowerTrend))/flagpoleHeight;
 
-    // Breakout detection
     let breakout=false;
     let score=0;
     if(flagpolePercent>=20){ score+=2; }
@@ -106,15 +111,15 @@ function analyzePennant(data){
     if(compression<0.3){ score+=3; }
     if(last.close>Math.max(...upperTrend) && last.volume>2*avgVolume(data,N)){ breakout=true; score+=5; }
 
-    // Measured move
     let target=last.close+flagpoleHeight;
+    let alertMsg="",highlightClass="";
+    if(compression<0.3 && breakout){ alertMsg="✅ Ready for Entry"; highlightClass="highlight"; setTimeout(()=>{ alert(`${symbol} setup alert! Target: $${target.toFixed(2)}`); },100); }
 
-    // Populate table
+    // Unique chart id per ticker
+    let chartId="chart_"+symbol;
     const table=document.getElementById("resultTable");
-    table.innerHTML=`<tr>
-        <th>Date</th><th>Close</th><th>Flagpole%</th><th>Pennant Compression</th><th>Breakout?</th><th>Measured Target</th><th>Score</th>
-    </tr>`;
-    table.innerHTML+=`<tr>
+    table.innerHTML+=`<tr class="${highlightClass}">
+        <td>${symbol}</td>
         <td>${last.date}</td>
         <td>${last.close.toFixed(2)}</td>
         <td>${flagpolePercent.toFixed(1)}%</td>
@@ -122,7 +127,63 @@ function analyzePennant(data){
         <td>${breakout?'Yes':'No'}</td>
         <td>${target.toFixed(2)}</td>
         <td>${score}</td>
+        <td>${alertMsg}</td>
+        <td><canvas id="${chartId}"></canvas></td>
     </tr>`;
+
+    // Sparkline chart
+    let ctx=document.getElementById(chartId).getContext('2d');
+    new Chart(ctx,{
+        type:'line',
+        data:{
+            labels:lookback.map(d=>d.date),
+            datasets:[{
+                label:'Close',
+                data:lookback.map(d=>d.close),
+                borderColor:'#6cf',
+                backgroundColor:'rgba(0,0,0,0)',
+                pointRadius:1,
+                borderWidth:2
+            },{
+                label:'Flagpole High',
+                data:Array(N).fill(maxClose),
+                borderColor:'#0f0',
+                borderDash:[5,5],
+                fill:false,
+                pointRadius:0
+            },{
+                label:'Flagpole Low',
+                data:Array(N).fill(minClose),
+                borderColor:'#f00',
+                borderDash:[5,5],
+                fill:false,
+                pointRadius:0
+            }]
+        },
+        options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:true,ticks:{color:'#eee'}}},elements:{line:{tension:0.2}}}
+    });
+
+    // Interpretation per ticker
+    let interp=[];
+    if(flagpolePercent>=20) interp.push(`Momentum exists (Flagpole ${flagpolePercent.toFixed(1)}%) ✅`);
+    else interp.push(`Momentum weak (Flagpole ${flagpolePercent.toFixed(1)}%) ⚠️`);
+    if(compression<0.3) interp.push(`Pennant is tight (Compression ${compression.toFixed(2)}) ✅`);
+    else interp.push(`Pennant is wide (Compression ${compression.toFixed(2)}) ⚠️`);
+    if(breakout) interp.push(`Breakout confirmed ✅`);
+    else interp.push(`Breakout not confirmed ❌`);
+    interp.push(`Measured move if breakout occurs: $${target.toFixed(2)}`);
+    interp.push(`Overall score: ${score} → ${score<5?'low confidence':'high confidence'}`);
+    interp.push(`Recommendation: ${breakout && compression<0.3?'Consider entry':'Monitor and wait for breakout + compression tightening'}`);
+
+    // Create per-ticker interpretation div below the table
+    let container=document.getElementById("interpret_"+symbol);
+    if(!container){
+        container=document.createElement("div");
+        container.id="interpret_"+symbol;
+        container.className="interpretation";
+        document.getElementById("resultTable").after(container);
+    }
+    container.innerHTML="<h3>"+symbol+" Interpretation</h3>"+interp.join("<br>");
 }
 </script>
 
