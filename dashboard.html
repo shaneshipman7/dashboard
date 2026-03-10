@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ATOM / Small-Cap Pennant Scanner (CORS Proxy)</title>
+<style>
+body { background:#111; color:#eee; font-family:Arial; margin:20px; }
+h1, h2 { color:#6cf; }
+input, button, textarea { width:100%; background:#222; color:white; border:1px solid #555; padding:6px; margin-bottom:10px; }
+button { background:#3a8cff; cursor:pointer; }
+table { border-collapse:collapse; width:100%; margin-bottom:20px; }
+th,td { border:1px solid #444; padding:6px; text-align:center; }
+th { background:#222; }
+tr:nth-child(even){ background:#1a1a1a; }
+.section { border:1px solid #444; padding:20px; margin-bottom:25px; border-radius:10px; background:#181818; }
+.noteBox { width:100%; height:120px; background:#222; color:white; border:1px solid #555; padding:10px; }
+</style>
+</head>
+<body>
+
+<h1>ATOM / Small-Cap Pennant Scanner (CORS Proxy)</h1>
+
+<div class="section">
+<h2>1️⃣ Stock Symbol</h2>
+<input id="ticker" value="ATOM">
+<button onclick="fetchData()">Fetch Data & Analyze</button>
+</div>
+
+<div class="section">
+<h2>2️⃣ Scanner Results</h2>
+<table id="resultTable">
+<tr>
+<th>Date</th>
+<th>Close</th>
+<th>Flagpole%</th>
+<th>Pennant Compression</th>
+<th>Breakout?</th>
+<th>Measured Target</th>
+<th>Score</th>
+</tr>
+</table>
+</div>
+
+<div class="section">
+<h2>3️⃣ Trade Notes / Combo Ideas</h2>
+<textarea class="noteBox" placeholder="Write notes, catalysts, options flow, combo trades..."></textarea>
+</div>
+
+<script>
+async function fetchData(){
+    let symbol=document.getElementById("ticker").value.toUpperCase();
+    // CORS proxy prepended
+    const url=`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + symbol + '?interval=1d&range=3mo')}`;
+    try{
+        const res=await fetch(url);
+        const text=await res.text();
+        const json=JSON.parse(JSON.parse(text).contents);
+        const result=json.chart.result[0];
+        const timestamps=result.timestamp;
+        const indicators=result.indicators.quote[0];
+        if(!timestamps || !indicators.close) { alert("No data available"); return; }
+
+        // Prepare OHLCV array
+        let data=[];
+        for(let i=0;i<timestamps.length;i++){
+            data.push({
+                date:new Date(timestamps[i]*1000).toISOString().split('T')[0],
+                open:indicators.open[i],
+                high:indicators.high[i],
+                low:indicators.low[i],
+                close:indicators.close[i],
+                volume:indicators.volume[i]
+            });
+        }
+
+        analyzePennant(data);
+    }catch(e){ alert("Error fetching data: "+e);}
+}
+
+// Helper for avg volume
+function avgVolume(data,N){
+    let subset=data.slice(-N);
+    let sum=subset.reduce((a,b)=>a+b.volume,0);
+    return sum/subset.length;
+}
+
+function analyzePennant(data){
+    const N=10; // lookback days
+    let last=data[data.length-1];
+
+    // Flagpole calculation
+    let maxClose=Math.max(...data.slice(-N).map(d=>d.close));
+    let minClose=Math.min(...data.slice(-N).map(d=>d.close));
+    let flagpoleHeight=maxClose-minClose;
+    let flagpolePercent=(flagpoleHeight/minClose)*100;
+
+    // Pennant compression
+    let upperTrend = data.slice(-N).map(d=>d.high);
+    let lowerTrend = data.slice(-N).map(d=>d.low);
+    let compression = (Math.max(...upperTrend)-Math.min(...lowerTrend))/flagpoleHeight;
+
+    // Breakout detection
+    let breakout=false;
+    let score=0;
+    if(flagpolePercent>=20){ score+=2; }
+    if(flagpolePercent>=20 && last.volume>1.5*avgVolume(data,N)){ score+=2; }
+    if(compression<0.3){ score+=3; }
+    if(last.close>Math.max(...upperTrend) && last.volume>2*avgVolume(data,N)){ breakout=true; score+=5; }
+
+    // Measured move
+    let target=last.close+flagpoleHeight;
+
+    // Populate table
+    const table=document.getElementById("resultTable");
+    table.innerHTML=`<tr>
+        <th>Date</th><th>Close</th><th>Flagpole%</th><th>Pennant Compression</th><th>Breakout?</th><th>Measured Target</th><th>Score</th>
+    </tr>`;
+    table.innerHTML+=`<tr>
+        <td>${last.date}</td>
+        <td>${last.close.toFixed(2)}</td>
+        <td>${flagpolePercent.toFixed(1)}%</td>
+        <td>${compression.toFixed(2)}</td>
+        <td>${breakout?'Yes':'No'}</td>
+        <td>${target.toFixed(2)}</td>
+        <td>${score}</td>
+    </tr>`;
+}
+</script>
+
+</body>
+</html>
