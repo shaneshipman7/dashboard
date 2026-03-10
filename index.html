@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Multi-Ticker Pennant Dashboard w/ Interpretations</title>
+<title>Multi-Ticker Pennant Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 body { background:#111; color:#eee; font-family:Arial; margin:20px; }
@@ -59,6 +59,9 @@ async function fetchAllTickers(){
     }
 }
 
+// Auto-refresh every 5 minutes
+setInterval(fetchAllTickers, 5*60*1000);
+
 async function fetchTicker(symbol){
     const url=`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + symbol + '?interval=1d&range=3mo')}`;
     try{
@@ -115,7 +118,7 @@ function analyzePennantMulti(symbol,data){
     let alertMsg="",highlightClass="";
     if(compression<0.3 && breakout){ alertMsg="✅ Ready for Entry"; highlightClass="highlight"; setTimeout(()=>{ alert(`${symbol} setup alert! Target: $${target.toFixed(2)}`); },100); }
 
-    // Unique chart id per ticker
+    // Chart
     let chartId="chart_"+symbol;
     const table=document.getElementById("resultTable");
     table.innerHTML+=`<tr class="${highlightClass}">
@@ -175,7 +178,7 @@ function analyzePennantMulti(symbol,data){
     interp.push(`Overall score: ${score} → ${score<5?'low confidence':'high confidence'}`);
     interp.push(`Recommendation: ${breakout && compression<0.3?'Consider entry':'Monitor and wait for breakout + compression tightening'}`);
 
-    // Create per-ticker interpretation div below the table
+    // Per-ticker interpretation box
     let container=document.getElementById("interpret_"+symbol);
     if(!container){
         container=document.createElement("div");
@@ -185,6 +188,9 @@ function analyzePennantMulti(symbol,data){
     }
     container.innerHTML="<h3>"+symbol+" Interpretation</h3>"+interp.join("<br>");
 }
+
+// Optional: Fetch on page load
+fetchAllTickers();
 </script>
 
 </body>
